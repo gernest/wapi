@@ -7,11 +7,7 @@ const Pkg = struct {
 };
 
 const packages = struct {
-    const list = []Pkg{
-        Pkg{ .name = "clap", .path = "lib/clap/src/index.zig" },
-        Pkg{ .name = "semver", .path = "lib/semver/src/main.zig" },
-        Pkg{ .name = "zson", .path = "lib/zson/src/main.zig" },
-    };
+    const list = []Pkg{Pkg{ .name = "clap", .path = "lib/clap/src/index.zig" }};
     fn addTo(ts: var) void {
         for (list) |p| {
             ts.addPackagePath(p.name, p.path);
@@ -21,7 +17,7 @@ const packages = struct {
 
 pub fn build(b: *Builder) void {
     const mode = b.standardReleaseOptions();
-    const exe = b.addExecutable("zpm", "src/main.zig");
+    const exe = b.addExecutable("wapi", "src/main.zig");
     packages.addTo(exe);
     exe.setBuildMode(mode);
     var main_tests = b.addTest("src/main.zig");
