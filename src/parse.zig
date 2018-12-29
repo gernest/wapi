@@ -11,7 +11,7 @@ const Tree = std.zig.ast.Tree;
 const parse = std.zig.parse;
 const Token = std.zig.Token;
 
-fn renderRoot(stream: var, name: []const u8, tree: *ast.Tree) anyerror!void {
+fn renderRoot(a: *Allocator, stream: var, name: []const u8, tree: *ast.Tree) anyerror!void {
     var tok_it = tree.tokens.iterator(0);
     var begin_comment: usize = 0;
     var begin = true;
@@ -24,6 +24,7 @@ fn renderRoot(stream: var, name: []const u8, tree: *ast.Tree) anyerror!void {
         }
         end_comment = token.end;
     }
+    try stream.print("@import(\"{}\")\n", name);
     if (end_comment > 0) {
         // file heading comment goes here.
         try stream.print("{}\n", tree.source[begin_comment..end_comment]);
@@ -35,11 +36,12 @@ fn renderRoot(stream: var, name: []const u8, tree: *ast.Tree) anyerror!void {
         if (decl == null) {
             break;
         }
-        try renderTopLevelDecl(stream, tree, decl.?.*);
+        try renderTopLevelDecl(a, stream, tree, decl.?.*);
     }
+    try stream.print("\n");
 }
 
-fn renderTopLevelDecl(stream: var, tree: *ast.Tree, decl: *ast.Node) anyerror!void {
+fn renderTopLevelDecl(a: *Allocator, stream: var, tree: *ast.Tree, decl: *ast.Node) anyerror!void {
     switch (decl.id) {
         ast.Node.Id.FnProto => {
             const fn_proto = @fieldParentPtr(ast.Node.FnProto, "base", decl);
@@ -63,4 +65,10 @@ fn renderTopLevelDecl(stream: var, tree: *ast.Tree, decl: *ast.Node) anyerror!vo
         },
         else => {},
     }
+}
+
+pub fn generate(a: *Allocator, stream: var, name: []const u8, source: []const u8) !void {
+    var tree = try parse(a, source);
+    defer tree.deinit();
+    return renderRoot(a, stream, name, &tree);
 }

@@ -1,14 +1,19 @@
+/// wapi is a commandline application that generates api documentation for zig
+/// source code.
+/// Documentation is generated from doc comments that are found in source files.
+/// Zig doc comments are prefixed with `///`
+///
+/// There is no special syntax needed for comments. The comment text is
+/// intepreted as markdown text. Cross referencing of identifiers is not supported yet.
 const std = @import("std");
 const clap = @import("clap");
 const mem = std.mem;
 const io = std.io;
-const json = std.json;
 const path = std.os.path;
-const Sha3_256 = std.crypto.Sha3_256;
 const warn = std.debug.warn;
 const Dir = std.os.Dir;
 const Entry = std.os.Dir.Entry;
-const base64 = std.base64.standard_encoder;
+const generate = @import("parse.zig").generate;
 
 fn generateDocs(allocator: *std.mem.Allocator, full_path: []const u8) !void {
     var buf = &try std.Buffer.init(allocator, "");
@@ -23,9 +28,6 @@ fn walkTree(allocator: *std.mem.Allocator, stream: var, full_path: []const u8) a
     defer dir.close();
     var full_entry_buf = std.ArrayList(u8).init(allocator);
     defer full_entry_buf.deinit();
-    var h = Sha3_256.init();
-    var out: [Sha3_256.digest_length]u8 = undefined;
-
     while (try dir.next()) |entry| {
         if (entry.name[0] == '.' or mem.eql(u8, entry.name, "zig-cache")) {
             continue;
@@ -39,7 +41,7 @@ fn walkTree(allocator: *std.mem.Allocator, stream: var, full_path: []const u8) a
             Entry.Kind.File => {
                 const content = try io.readFileAlloc(allocator, full_entry_path);
                 errdefer allocator.free(content);
-                try stream.print("{s}\n", full_entry_path);
+                try generate(allocator, stream, full_entry_path, content);
                 allocator.free(content);
             },
             Entry.Kind.Directory => {
