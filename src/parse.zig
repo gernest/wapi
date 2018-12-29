@@ -11,8 +11,10 @@ const ast = std.zig.ast;
 const Tree = std.zig.ast.Tree;
 const parse = std.zig.parse;
 const Token = std.zig.Token;
+const Node = ast.Node;
+const PrefixOp = Node.PrefixOp;
 
-fn renderRoot(a: *Allocator, stream: var, name: []const u8, tree: *ast.Tree) anyerror!void {
+fn renderRoot(a: *Allocator, stream: var, name: []const u8, tree: *Tree) anyerror!void {
     var tok_it = tree.tokens.iterator(0);
     var begin_comment: usize = 0;
     var begin = true;
@@ -73,33 +75,84 @@ fn printComments(a: *Allocator, stream: var, comments: []const u8) !void {
     }
 }
 
-fn renderTopLevelDecl(a: *Allocator, stream: var, tree: *ast.Tree, decl: *ast.Node) anyerror!void {
+fn renderTopLevelDecl(a: *Allocator, stream: var, tree: *Tree, decl: *Node) anyerror!void {
     switch (decl.id) {
-        ast.Node.Id.FnProto => {
-            const fn_proto = @fieldParentPtr(ast.Node.FnProto, "base", decl);
+        Node.Id.FnProto => {
+            const fn_proto = @fieldParentPtr(Node.FnProto, "base", decl);
             if (fn_proto.visib_token != null) {
                 const name = tree.tokenSlice(fn_proto.name_token.?);
-                try stream.print("pub fn {}()", name);
+                try stream.print("pub fn {} (", name);
+                var it = &fn_proto.params.iterator(0);
+                var start = true;
+                while (true) {
+                    var param_ptr = it.next();
+                    if (param_ptr == null) {
+                        break;
+                    }
+                    var param = param_ptr.?.*;
+                    if (!start) {
+                        try stream.print(", ");
+                    } else {
+                        start = false;
+                    }
+                    var param_decl = @fieldParentPtr(Node.ParamDecl, "base", param);
+                    try renderParam(a, stream, param_decl, tree);
+                }
+                try stream.print(")");
             }
         },
 
-        ast.Node.Id.VarDecl => {
-            const var_decl = @fieldParentPtr(ast.Node.VarDecl, "base", decl);
+        Node.Id.VarDecl => {
+            const var_decl = @fieldParentPtr(Node.VarDecl, "base", decl);
             const name = tree.tokenSlice(var_decl.name_token);
         },
 
-        ast.Node.Id.StructField => {
-            const field = @fieldParentPtr(ast.Node.StructField, "base", decl);
+        Node.Id.StructField => {
+            const field = @fieldParentPtr(Node.StructField, "base", decl);
         },
 
-        ast.Node.Id.UnionTag => {
-            const tag = @fieldParentPtr(ast.Node.UnionTag, "base", decl);
+        Node.Id.UnionTag => {
+            const tag = @fieldParentPtr(Node.UnionTag, "base", decl);
         },
 
-        ast.Node.Id.EnumTag => {
-            const tag = @fieldParentPtr(ast.Node.EnumTag, "base", decl);
+        Node.Id.EnumTag => {
+            const tag = @fieldParentPtr(Node.EnumTag, "base", decl);
         },
         else => {},
+    }
+}
+
+fn renderParam(a: *Allocator, stream: var, decl: *Node.ParamDecl, tree: *Tree) !void {
+    if (decl.comptime_token != null) {
+        try stream.print("comptime ");
+    }
+    const name = tree.tokenSlice(decl.name_token.?);
+    try stream.print("{}: ", name);
+    switch (decl.type_node.id) {
+        Node.Id.VarType => {
+            try stream.print("{}", decl.type_node.id);
+            // try stream.print("var");
+        },
+        Node.Id.PrefixOp => {
+            var ops_type = @fieldParentPtr(Node.PrefixOp, "base", decl.type_node);
+            switch (ops_type.op) {
+                PrefixOp.Op.PtrType => |info| {
+                    switch (ops_type.rhs.id) {
+                        Node.Id.Identifier => {
+                            var ident = @fieldParentPtr(Node.Identifier, "base", decl.type_node);
+                            const ident_name = tree.tokenSlice(ident.token);
+                            const next = tree.tokenSlice(ident.token + 1);
+                            try stream.print("{}{}", ident_name, next);
+                        },
+                        else => {},
+                    }
+                },
+                else => {},
+            }
+        },
+        else => {
+            try stream.print("{}", decl.type_node.id);
+        },
     }
 }
 
