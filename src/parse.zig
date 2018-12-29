@@ -1,4 +1,5 @@
 const std = @import("std");
+const io = std.io;
 const Buffer = std.Buffer;
 const builtin = @import("builtin");
 const assert = std.debug.assert;
@@ -26,8 +27,19 @@ fn renderRoot(a: *Allocator, stream: var, name: []const u8, tree: *ast.Tree) any
     }
     try stream.print("@import(\"{}\")\n", name);
     if (end_comment > 0) {
-        // file heading comment goes here.
-        try stream.print("{}\n", tree.source[begin_comment..end_comment]);
+        var comment_stream = std.io.SliceInStream.init(tree.source[begin_comment..end_comment]);
+        var buf = try Buffer.init(a, "");
+        defer buf.deinit();
+        while (true) {
+            if (io.readLineFrom(&comment_stream.stream, &buf)) |comment| {
+                try stream.print("{}\n", removePrefix(comment, "///"));
+            } else |err| {
+                if (err != error.EndOfStream) {
+                    return err;
+                }
+                break;
+            }
+        }
     }
 
     var it = tree.root_node.decls.iterator(0);
@@ -39,6 +51,16 @@ fn renderRoot(a: *Allocator, stream: var, name: []const u8, tree: *ast.Tree) any
         try renderTopLevelDecl(a, stream, tree, decl.?.*);
     }
     try stream.print("\n");
+}
+
+fn removePrefix(s: []const u8, prefix: []const u8) []const u8 {
+    if (s.len < prefix.len) {
+        return s;
+    }
+    if (!mem.eql(u8, s[0..prefix.len], prefix)) {
+        return s;
+    }
+    return s[prefix.len..];
 }
 
 fn renderTopLevelDecl(a: *Allocator, stream: var, tree: *ast.Tree, decl: *ast.Node) anyerror!void {
