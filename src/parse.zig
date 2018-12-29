@@ -27,19 +27,8 @@ fn renderRoot(a: *Allocator, stream: var, name: []const u8, tree: *ast.Tree) any
     }
     try stream.print("@import(\"{}\")\n", name);
     if (end_comment > 0) {
-        var comment_stream = std.io.SliceInStream.init(tree.source[begin_comment..end_comment]);
-        var buf = try Buffer.init(a, "");
-        defer buf.deinit();
-        while (true) {
-            if (io.readLineFrom(&comment_stream.stream, &buf)) |comment| {
-                try stream.print("{}\n", removePrefix(comment, "///"));
-            } else |err| {
-                if (err != error.EndOfStream) {
-                    return err;
-                }
-                break;
-            }
-        }
+        try printComments(a, stream, tree.source[begin_comment..end_comment]);
+        try stream.print("\n");
     }
 
     var it = tree.root_node.decls.iterator(0);
@@ -63,10 +52,35 @@ fn removePrefix(s: []const u8, prefix: []const u8) []const u8 {
     return s[prefix.len..];
 }
 
+/// printComments prints comments to the stream. comments is a slice of zig doc comments.
+/// The printed string will be without the prefixed /// characters.
+///
+/// Any errors such as OutOfMemory will be returned. This will do nothing if
+/// comments is empty.
+fn printComments(a: *Allocator, stream: var, comments: []const u8) !void {
+    var comment_stream = std.io.SliceInStream.init(comments);
+    var buf = try Buffer.init(a, "");
+    defer buf.deinit();
+    while (true) {
+        if (io.readLineFrom(&comment_stream.stream, &buf)) |comment| {
+            try stream.print("{}\n", removePrefix(comment, "///"));
+        } else |err| {
+            if (err != error.EndOfStream) {
+                return err;
+            }
+            break;
+        }
+    }
+}
+
 fn renderTopLevelDecl(a: *Allocator, stream: var, tree: *ast.Tree, decl: *ast.Node) anyerror!void {
     switch (decl.id) {
         ast.Node.Id.FnProto => {
             const fn_proto = @fieldParentPtr(ast.Node.FnProto, "base", decl);
+            if (fn_proto.visib_token != null) {
+                const name = tree.tokenSlice(fn_proto.name_token.?);
+                try stream.print("pub fn {}()", name);
+            }
         },
 
         ast.Node.Id.VarDecl => {
