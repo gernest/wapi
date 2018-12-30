@@ -14,7 +14,7 @@ const Token = std.zig.Token;
 const Node = ast.Node;
 const PrefixOp = Node.PrefixOp;
 
-fn renderRoot(a: *Allocator, stream: var, name: []const u8, tree: *Tree) anyerror!void {
+fn renderRoot(a: *Allocator, ctx: *ItemList, name: []const u8, tree: *Tree) anyerror!void {
     var tok_it = tree.tokens.iterator(0);
     var begin_comment: usize = 0;
     var begin = true;
@@ -27,10 +27,10 @@ fn renderRoot(a: *Allocator, stream: var, name: []const u8, tree: *Tree) anyerro
         }
         end_comment = token.end;
     }
-    try stream.print("@import(\"{}\")\n", name);
     if (end_comment > 0) {
-        try printComments(a, stream, tree.source[begin_comment..end_comment]);
-        try stream.print("\n");
+        try ctx.append(Item{
+            .kind = Item.Kind{ .Package = tree.source[begin_comment..end_comment] },
+        });
     }
 
     var it = tree.root_node.decls.iterator(0);
@@ -39,9 +39,8 @@ fn renderRoot(a: *Allocator, stream: var, name: []const u8, tree: *Tree) anyerro
         if (decl == null) {
             break;
         }
-        try renderTopLevelDecl(a, stream, tree, decl.?.*);
+        try renderTopLevelDecl(a, ctx, tree, decl.?.*);
     }
-    try stream.print("\n");
 }
 
 fn removePrefix(s: []const u8, prefix: []const u8) []const u8 {
@@ -75,30 +74,17 @@ fn printComments(a: *Allocator, stream: var, comments: []const u8) !void {
     }
 }
 
-fn renderTopLevelDecl(a: *Allocator, stream: var, tree: *Tree, decl: *Node) anyerror!void {
+fn renderTopLevelDecl(a: *Allocator, ctx: *ItemList, tree: *Tree, decl: *Node) anyerror!void {
     switch (decl.id) {
         Node.Id.FnProto => {
             const fn_proto = @fieldParentPtr(Node.FnProto, "base", decl);
             if (fn_proto.visib_token != null) {
                 const name = tree.tokenSlice(fn_proto.name_token.?);
-                try stream.print("pub fn {} (", name);
-                var it = &fn_proto.params.iterator(0);
-                var start = true;
-                while (true) {
-                    var param_ptr = it.next();
-                    if (param_ptr == null) {
-                        break;
-                    }
-                    var param = param_ptr.?.*;
-                    if (!start) {
-                        try stream.print(", ");
-                    } else {
-                        start = false;
-                    }
-                    var param_decl = @fieldParentPtr(Node.ParamDecl, "base", param);
-                    try renderParam(a, stream, param_decl, tree);
-                }
-                try stream.print(")");
+                var func: Item.FnProto = undefined;
+                func.name = name;
+                try ctx.append(Item{
+                    .kind = Item.Kind{ .FnProto = func },
+                });
             }
         },
 
@@ -122,42 +108,75 @@ fn renderTopLevelDecl(a: *Allocator, stream: var, tree: *Tree, decl: *Node) anye
     }
 }
 
-fn renderParam(a: *Allocator, stream: var, decl: *Node.ParamDecl, tree: *Tree) !void {
-    if (decl.comptime_token != null) {
-        try stream.print("comptime ");
-    }
-    const name = tree.tokenSlice(decl.name_token.?);
-    try stream.print("{}: ", name);
-    switch (decl.type_node.id) {
-        Node.Id.VarType => {
-            try stream.print("{}", decl.type_node.id);
-            // try stream.print("var");
-        },
-        Node.Id.PrefixOp => {
-            var ops_type = @fieldParentPtr(Node.PrefixOp, "base", decl.type_node);
-            switch (ops_type.op) {
-                PrefixOp.Op.PtrType => |info| {
-                    switch (ops_type.rhs.id) {
-                        Node.Id.Identifier => {
-                            var ident = @fieldParentPtr(Node.Identifier, "base", decl.type_node);
-                            const ident_name = tree.tokenSlice(ident.token);
-                            const next = tree.tokenSlice(ident.token + 1);
-                            try stream.print("{}{}", ident_name, next);
-                        },
-                        else => {},
-                    }
-                },
-                else => {},
-            }
-        },
-        else => {
-            try stream.print("{}", decl.type_node.id);
-        },
-    }
-}
-
 pub fn generate(a: *Allocator, stream: var, name: []const u8, source: []const u8) !void {
     var tree = try parse(a, source);
     defer tree.deinit();
-    return renderRoot(a, stream, name, &tree);
+    var ctx = ItemList.init(a);
+    defer ctx.deinit();
+    try renderRoot(a, &ctx, name, &tree);
+    var it = ctx.iterator();
+    while (it.next()) |item| {
+        try item.print(stream);
+    }
 }
+
+const ItemList = std.ArrayList(Item);
+
+const Item = struct {
+    kind: Kind,
+
+    // Kind defines options for the documentation item. For the high level Api
+    // we only have a few options which are.
+    const Kind = union(enum) {
+        // Package is the toplevel package comment. There is really no concept
+        // of packages since each file behaves like a container so this is the
+        // toplevel doc comment in a zig file.
+        Package: []const u8,
+
+        // FnProto defines documentation for a function.
+        FnProto: FnProto,
+    };
+
+    const FnProto = struct {
+        doc: ?[]const u8,
+        name: []const u8,
+        params: ?ParamList,
+
+        fn print(self: *const FnProto, stream: var) !void {
+            try stream.print("{} (", self.name);
+            if (self.params) |*params| {}
+            try stream.print(")\n");
+            // TODO : print return types
+        }
+    };
+
+    const BoundInfo = struct {
+        name: []const u8,
+        name_space: []const u8,
+    };
+
+    const Param = struct {
+        name: []const u8,
+        value: ParamValue,
+    };
+
+    const ParamValue = struct {
+        pre_symbols: ?StringList,
+        value: []const u8,
+    };
+
+    const StringList = std.ArrayList([]const u8);
+    const ParamList = std.ArrayList(Param);
+
+    fn print(self: *const Item, stream: var) !void {
+        switch (self.kind) {
+            Kind.Package => |pkg| {
+                try stream.print("{}\n", pkg);
+            },
+            Kind.FnProto => |fn_proto| {
+                try fn_proto.print(stream);
+            },
+            else => {},
+        }
+    }
+};
