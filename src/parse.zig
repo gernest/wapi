@@ -82,6 +82,11 @@ fn renderTopLevelDecl(a: *Allocator, ctx: *ItemList, tree: *Tree, decl: *Node) a
                 const name = tree.tokenSlice(fn_proto.name_token.?);
                 var func: Item.FnProto = undefined;
                 func.name = name;
+                if (fn_proto.doc_comments) |doc| {
+                    const begin = tree.tokens.at(doc.firstToken());
+                    const end = tree.tokens.at(doc.lastToken());
+                    func.doc = tree.source[begin.start..end.end];
+                }
                 try ctx.append(Item{
                     .kind = Item.Kind{ .FnProto = func },
                 });
@@ -108,6 +113,8 @@ fn renderTopLevelDecl(a: *Allocator, ctx: *ItemList, tree: *Tree, decl: *Node) a
     }
 }
 
+/// generate parses source and generate documentation based on doc comments.
+/// This assumes that doc comments are valid markdown text.
 pub fn generate(a: *Allocator, stream: var, name: []const u8, source: []const u8) !void {
     var tree = try parse(a, source);
     defer tree.deinit();
@@ -143,12 +150,20 @@ const Item = struct {
         params: ?ParamList,
 
         fn print(self: *const FnProto, stream: var) !void {
+            try newLine(stream);
+            if (self.doc) |doc| {
+                try stream.print("{}\n", doc);
+            }
             try stream.print("{} (", self.name);
             if (self.params) |*params| {}
             try stream.print(")\n");
             // TODO : print return types
         }
     };
+
+    fn newLine(stream: var) !void {
+        try stream.print("\n");
+    }
 
     const BoundInfo = struct {
         name: []const u8,
